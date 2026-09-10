@@ -1,0 +1,12 @@
+# Secrets — real keys, paid download URLs and passwords live here, NEVER commit
+backend/books-api.env
+*.env
+!*.env.example
+
+# Build artifacts
+backend/books-api
+backend/books-api.bak
+*.log
+
+# OS noise
+.DS_Store
