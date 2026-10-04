@@ -7,7 +7,7 @@ const ROOT = new URL(process.argv[2] ?? '../frontend', import.meta.url).pathname
 const API = process.env.BOOKS_API ?? 'http://127.0.0.1:8787'
 const PORT = process.env.PORT ?? 4321
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.xml': 'application/xml', '.json': 'application/json' }
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.xml': 'application/xml', '.json': 'application/json', '.pdf': 'application/pdf', '.zip': 'application/zip' }
 
 createServer(async (req, res) => {
   if (req.url.startsWith('/api/') || req.url === '/healthz') {

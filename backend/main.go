@@ -1,29 +1,35 @@
 // Command books-api is a small standalone backend for the books.rikka.moe
-// landing page. It verifies premium (爱发电) keys and gates the real download
-// URLs behind an HMAC-signed HttpOnly cookie, so URLs never appear in page
-// source or JS.
+// landing page. It verifies premium (爱发电) keys and gates the premium
+// downloads behind an HMAC-signed HttpOnly cookie, so the file URLs never
+// appear in page source or JS.
 //
-// API contract (kept identical to the previous Cloudflare Pages Function so
-// the existing frontend works unchanged):
+// API contract:
 //
 //	POST /api/books/verify           {"key": "..."} -> {"success": true, "labels": [...]} + Set-Cookie
-//	GET  /api/books/download/{index} signed cookie  -> 302 redirect to the real URL
+//	GET  /api/books/download/{index} signed cookie  -> the file, or a 302 to the real URL
 //	GET  /healthz                    -> {"ok": true}
+//
+// A PREMIUM_DOWNLOAD_URL entry that starts with "/" is a self-hosted file:
+// it is served with X-Accel-Redirect, i.e. nginx streams the file from an
+// `internal` location (see the vhost's /protected/ block) and the bytes never
+// pass through this process. Anything else is treated as a remote URL and
+// answered with a 302.
 //
 // Configuration (environment variables):
 //
-//	PORT                   listen port                          (default "8787")
-//	BOOK_KEYS              comma-separated valid premium keys   (required)
-//	PREMIUM_DOWNLOAD_URL   comma-separated download URLs        (required)
-//	SIGNING_SECRET         HMAC secret for the session cookie   (default: BOOK_KEYS)
-//	ALLOWED_ORIGINS        comma-separated credentialed CORS origins
-//	                       (default "https://books.rikka.moe,http://localhost:4321,http://127.0.0.1:4321")
-//	DEV_INSECURE           set to "1" to drop the Secure cookie attribute on plain-http dev
+//	PORT                    listen port                          (default "8787")
+//	BOOK_KEYS               comma-separated valid premium keys   (required)
+//	PREMIUM_DOWNLOAD_URL    comma-separated download URLs or self-hosted paths (required)
+//	PREMIUM_DOWNLOAD_LABELS optional comma-separated button labels matching
+//	                        PREMIUM_DOWNLOAD_URL; missing entries fall back to
+//	                        a label derived from the URL
+//	SIGNING_SECRET          HMAC secret for the session cookie   (default: BOOK_KEYS)
+//	ALLOWED_ORIGINS         comma-separated credentialed CORS origins
+//	                        (default "https://books.rikka.moe,http://localhost:4321,http://127.0.0.1:4321")
+//	DEV_INSECURE            set to "1" to drop the Secure cookie attribute on plain-http dev
 //
-// Deployment note: serve it on a same-site host (e.g. api.rikka.moe) so the
-// SameSite=Strict cookie set for rikka.moe is still sent from
-// books.rikka.moe, then build the site with PUBLIC_BOOKS_API_BASE pointing at
-// it (see src/data/books.ts).
+// Deployment note: keep the API on the site's own origin (nginx proxies
+// /api/ to this process) so the SameSite=Strict cookie keeps working.
 package main
 
 import (
@@ -35,7 +41,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -72,11 +80,26 @@ func loadConfig(getenv func(string) string) (*config, error) {
 	for _, u := range strings.Split(getenv("PREMIUM_DOWNLOAD_URL"), ",") {
 		if u = strings.TrimSpace(u); u != "" {
 			urls = append(urls, u)
-			labels = append(labels, labelForURL(u))
+			labels = append(labels, "")
 		}
 	}
 	if len(urls) == 0 {
 		return nil, errors.New("PREMIUM_DOWNLOAD_URL is not set (comma-separated download URLs)")
+	}
+
+	// PREMIUM_DOWNLOAD_LABELS overrides the derived labels (it is how the
+	// buttons carry an extract password or a volume name). Entries left blank
+	// or missing fall back to a label derived from the URL.
+	for i, l := range strings.Split(getenv("PREMIUM_DOWNLOAD_LABELS"), ",") {
+		if i >= len(labels) {
+			break
+		}
+		labels[i] = strings.TrimSpace(l)
+	}
+	for i, l := range labels {
+		if l == "" {
+			labels[i] = labelForURL(urls[i])
+		}
 	}
 
 	secret := strings.TrimSpace(getenv("SIGNING_SECRET"))
@@ -111,6 +134,8 @@ func loadConfig(getenv func(string) string) (*config, error) {
 // Only labels cross the API boundary — never the URLs themselves.
 func labelForURL(u string) string {
 	switch {
+	case strings.HasPrefix(u, "/"):
+		return "站内下载"
 	case strings.Contains(u, "lanzn.com"), strings.Contains(u, "lanzou"):
 		return "蓝奏云下载（国内推荐）"
 	case strings.Contains(u, "cloud.rikka.moe"):
@@ -265,7 +290,39 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 302 redirect: the real URL only ever appears as a Location header.
+	// Self-hosted file: let nginx stream it from the `internal` location and
+	// name the download after the real file, which is ASCII here so the saved
+	// name is spelled out explicitly.
+	target := s.cfg.downloadURLs[index]
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, s.cfg.downloadURLs[index], http.StatusFound)
+	if strings.HasPrefix(target, "/") {
+		w.Header().Set("Content-Disposition", contentDisposition(path.Base(target)))
+		w.Header().Set("X-Accel-Redirect", target)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// 302 redirect: the real URL only ever appears as a Location header.
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// downloadNames maps a self-hosted file name to the name the browser saves it
+// as (RFC 5987 attachment name), so internal paths can stay ASCII while the
+// download keeps its Chinese title.
+var downloadNames = map[string]string{
+	"journey-full-clean.pdf": "中学数学之旅_合订本_无水印版.pdf",
+	"journey-vol1-clean.pdf": "中学数学之旅_第一卷_无水印版.pdf",
+	"journey-vol2-clean.pdf": "中学数学之旅_第二卷_无水印版.pdf",
+	"journey-vol3-clean.pdf": "中学数学之旅_第三卷_无水印版.pdf",
+	"journey-vol4-clean.pdf": "中学数学之旅_第四卷_无水印版.pdf",
+	"journey-vol5-clean.pdf": "中学数学之旅_第五卷_无水印版.pdf",
+	"journey-clean-all.zip":  "中学数学之旅_无水印版.zip",
+}
+
+func contentDisposition(base string) string {
+	name, ok := downloadNames[base]
+	if !ok {
+		name = base
+	}
+	return "attachment; filename=\"" + base + "\"; filename*=UTF-8''" + url.PathEscape(name)
 }

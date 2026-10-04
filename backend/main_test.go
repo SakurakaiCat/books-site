@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -215,4 +216,64 @@ func TestHealthz(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("healthz = %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestPremiumLabelsOverride(t *testing.T) {
+	cfg, err := loadConfig(testEnv(map[string]string{
+		"BOOK_KEYS":               "k",
+		"PREMIUM_DOWNLOAD_URL":    "/protected/journey/journey-full-clean.pdf,https://sakura10.lanzn.com/xyz",
+		"PREMIUM_DOWNLOAD_LABELS": "合订本 PDF（无水印）",
+	}))
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	// The supplied label wins; the missing one falls back to a derived label.
+	want := []string{"合订本 PDF（无水印）", "蓝奏云下载（国内推荐）"}
+	if strings.Join(cfg.labels, ",") != strings.Join(want, ",") {
+		t.Fatalf("labels = %v, want %v", cfg.labels, want)
+	}
+}
+
+func TestDownloadServesSelfHostedFile(t *testing.T) {
+	s := &server{cfg: mustConfig(t, map[string]string{
+		"BOOK_KEYS":            "k",
+		"PREMIUM_DOWNLOAD_URL": "/protected/journey/journey-vol1-clean.pdf",
+		"DEV_INSECURE":         "1",
+	})}
+
+	rec := verifyRequest(t, s, `{"key":"k"}`, "")
+	cookie := rec.Result().Cookies()[0]
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books/download/0", nil)
+	req.AddCookie(cookie)
+	req.SetPathValue("index", "0")
+	drec := httptest.NewRecorder()
+	s.handleDownload(drec, req)
+
+	// nginx takes over via X-Accel-Redirect: no redirect, no body.
+	if drec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", drec.Code)
+	}
+	if loc := drec.Header().Get("Location"); loc != "" {
+		t.Fatalf("Location = %q, want empty for a self-hosted file", loc)
+	}
+	if got := drec.Header().Get("X-Accel-Redirect"); got != "/protected/journey/journey-vol1-clean.pdf" {
+		t.Fatalf("X-Accel-Redirect = %q", got)
+	}
+	cd := drec.Header().Get("Content-Disposition")
+	if !strings.Contains(cd, `filename="journey-vol1-clean.pdf"`) {
+		t.Fatalf("Content-Disposition = %q, want an ASCII fallback name", cd)
+	}
+	if !strings.Contains(cd, "filename*=UTF-8''"+url.PathEscape("中学数学之旅_第一卷_无水印版.pdf")) {
+		t.Fatalf("Content-Disposition = %q, want the Chinese download name", cd)
+	}
+}
+
+func mustConfig(t *testing.T, vars map[string]string) *config {
+	t.Helper()
+	cfg, err := loadConfig(testEnv(vars))
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	return cfg
 }
