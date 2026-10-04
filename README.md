@@ -9,9 +9,8 @@
 | --- | --- |
 | `frontend/` | 静态站点根目录 → VPS `/opt/books-site/frontend` |
 | `frontend/index.html` | 手写的单文件页面（无框架、无水合脚本） |
-| `frontend/_astro/index.BXJfX1B-.css` | 既有编译好的 Kumo/Tailwind 样式表（沿用，未改动） |
-| `frontend/assets/site.css` | 下载卡片样式 + 下滑显现特效（`html.reveal [data-rv]`） |
-| `frontend/assets/site.js` | 下滑显现、顶部进度条、爱发电密钥验证 |
+| `frontend/assets/site.css` | 全站唯一样式表（极简风格：一栏阅读流 + 大按钮） |
+| `frontend/assets/site.js` | 爱发电密钥验证（页面唯一交互） |
 | `frontend/images/`、`favicon.*`、`sitemap-*.xml` | 封面、内容预览图与站点元数据 |
 | `backend/` | `books-api`：校验爱发电密钥、签发 HMAC cookie、内部投递精装版文件 |
 | `scripts/dev-server.mjs` | 本地静态 + API 反向代理（`node scripts/dev-server.mjs frontend`） |
@@ -19,10 +18,21 @@
 ### 关于 `index.html`
 
 早期版本是 Astro + React islands 的**构建产物**（本仓库从未包含 Astro 源码，只有构建结果）。
-构建输出里的 `_astro/*.js` 是压缩过、且无法重新生成的水合脚本，任何改动都要同时改 SSR HTML 和
-压缩 JS，既难维护也容易失配。因此 2026-10-04 起 `index.html` 改为纯静态手写页面：删除了所有
-`_astro/*.js`（保留样式表），交互（密钥验证、下滑特效）由 `assets/site.js` 实现。
-改页面 = 直接编辑 `index.html` 和 `assets/site.{css,js}`。
+2026-10-04 起改为纯静态手写页面；同日晚些时候的极简改版进一步**删掉了 `_astro/` 编译样式表**，
+全站样式收敛到 `assets/site.css`（系统字体栈、单列阅读流、超大下载按钮），交互只剩密钥验证。
+页面信息架构面向「只有基本识字能力」的读者，顺序为：
+
+1. 免费下载（蓝色大按钮，单卷 PDF / 合订本 / ZIP 打包）
+2. 购买无水印版（拼好饭话术 → 爱发电 → 粘贴密钥 → 出现下载按钮）
+3. 使用帮助（PDF 阅读器推荐：Adobe Acrobat Reader 为首推；ZIP 解压教程按
+   苹果 / 安卓 / Windows（7-Zip、WinRAR）分平台；密码说明见下）
+4. 更多书目（函数与导数、从零开始系列）
+
+**关于免费版 PDF 的密码**：水印版 PDF 带所有者密码（AES-256，仅允许阅读，
+禁止打印 / 复制 / 修改），**打开阅读不需要输入任何密码**。个别不规范的阅读器会把
+所有者密码当成打开密码向用户索要——页面「使用帮助」的提示是：换一个阅读器
+（首推 Adobe Acrobat Reader）即可正常阅读。构建时所有者密码由
+`mjourney` 仓库 `tools/build_release.py` 的 `MJOURNEY_OWNER_PASSWORD` 注入。
 
 ## 下载模型
 

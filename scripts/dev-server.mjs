@@ -1,9 +1,14 @@
 // Local static + API reverse proxy for books.rikka.moe
 import { createServer } from 'node:http'
 import { createReadStream, statSync, existsSync } from 'node:fs'
-import { join, extname } from 'node:path'
+import { join, extname, resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = new URL(process.argv[2] ?? '../frontend', import.meta.url).pathname
+// 位置参数按 cwd 解析（README 用法 `node scripts/dev-server.mjs frontend`）；
+// 缺省时回退到仓库内的 frontend/ 目录。
+const ROOT = process.argv[2]
+  ? resolve(process.argv[2])
+  : join(dirname(fileURLToPath(import.meta.url)), '..', 'frontend')
 const API = process.env.BOOKS_API ?? 'http://127.0.0.1:8787'
 const PORT = process.env.PORT ?? 4321
 
