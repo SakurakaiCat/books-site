@@ -38,8 +38,14 @@
     results.classList.remove('dl-hidden');
   };
 
+  // 密钥常见的手输错误：把大写 I 看成小写 l、数字 0 看成字母 O、复制时带入
+  // 零宽字符或空格。这里只做「去掉不可见字符 + 去首尾空白」，不改变大小写
+  // 语义（密钥仍然区分大小写），但失败时给出明确提示。
+  const normalizeKey = (raw) => raw.replace(/[\u200b-\u200d\ufeff]/g, '').trim();
+  const HINT = '请回爱发电的消息里复制粘贴密钥——手输时容易把大写 I 看成小写 l、数字 0 看成字母 O。';
+
   const verify = async () => {
-    const key = input.value.trim();
+    const key = normalizeKey(input.value);
     results.replaceChildren();
     results.classList.add('dl-hidden');
 
@@ -65,7 +71,7 @@
         renderLinks(data.labels);
         setStatus('✓ 验证成功！点下面的按钮下载无水印版：', 'ok');
       } else {
-        setStatus(data.message || '密钥不对，请回爱发电消息里复制完整密钥再试', 'error');
+        setStatus(`${data.message || '密钥无效，请检查后重试'} ${HINT}`, 'error');
       }
     } catch (error) {
       setStatus('验证服务暂时连不上，请稍后再试', 'error');
