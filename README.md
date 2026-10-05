@@ -71,6 +71,12 @@ cd backend && go vet ./... && go test ./...
 CGO_ENABLED=0 go build -trimpath -o books-api .
 ```
 
+## 缓存策略
+
+- HTML（`/` 与 `*.html`）：nginx 发 `Cache-Control: no-cache, must-revalidate`，浏览器每次回源校验，未变走 304——改版即时可见。
+- `/assets/site.{css,js}`：7 天长缓存，但 index.html 引用时带 `?v=YYYYMMDD` 版本号；**改这两个文件时必须同时 bump 版本号**。
+- `/downloads/*`：7 天公开缓存（文件名不变即内容不变）。
+
 ## 部署（VPS: `ssh vps`）
 
 ```sh
