@@ -14,6 +14,7 @@
 | `frontend/images/`、`favicon.*`、`sitemap-*.xml` | 封面、内容预览图与站点元数据 |
 | `backend/` | `books-api`：校验爱发电密钥、签发 HMAC cookie、内部投递精装版文件 |
 | `scripts/dev-server.mjs` | 本地静态 + API 反向代理（`node scripts/dev-server.mjs frontend`） |
+| `scripts/make-previews.py` | 从最新发布构建的 PDF 重新生成页面上的书页截图 |
 
 ### 关于 `index.html`
 
@@ -70,6 +71,32 @@ GET  /healthz                    -> {"ok": true}
 cd backend && go vet ./... && go test ./...
 CGO_ENABLED=0 go build -trimpath -o books-api .
 ```
+
+## 内容预览截图
+
+`frontend/images/books/previews/` 里的书页截图由 `scripts/make-previews.py` 生成，
+源是 mjourney 发布目录里的 **无水印版** PDF（截图用于展示成品观感，免费版页脚带水印这一点在页面文案里另有说明）：
+
+| 文件 | 来源 | 说明 |
+| --- | --- | --- |
+| `journey-cover.webp` | 合订本 第 1 页 | 封面 |
+| `journey-formula.webp` | 第一卷 §1.2 乘法公式与因式分解 | 页眉定位 |
+| `journey-composite.webp` | 第一卷 §3.8 函数的复合 | 页眉定位 |
+| `journey-lp.webp` | 第三卷 §3.2 线性规划初步 | 按图题「无界可行域」定位 |
+| `func-math-*.webp` | 《函数与导数》（另一个书稿仓库） | 手工留存的旧图，未随本次重构更新 |
+
+发布版 PDF 的文本层被 `anti_extract.py` 毒化（ToUnicode 同形字），直接 pdftotext 得到的是
+乱码；脚本用 mjourney 的密表 `tools/extraction_cipher.json` 还原文本，再按页眉/图题定位页码，
+所以重新编译、页码变动后仍然能找到正确页面：
+
+```sh
+python3 scripts/make-previews.py \
+    --clean-dir /root/Desktop/mjourney_release \
+    --cipher /root/mjourney/tools/extraction_cipher.json \
+    --out frontend/images/books/previews
+```
+
+改完记得 rsync 到 VPS，并 bump `index.html` 里的 `?v=` 版本号。
 
 ## 缓存策略
 
