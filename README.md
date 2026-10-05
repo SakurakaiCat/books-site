@@ -102,6 +102,7 @@ python3 scripts/make-previews.py \
 
 - HTML（`/` 与 `*.html`）：nginx 发 `Cache-Control: no-cache, must-revalidate`，浏览器每次回源校验，未变走 304——改版即时可见。
 - `/assets/site.{css,js}`：7 天长缓存，但 index.html 引用时带 `?v=YYYYMMDD` 版本号；**改这两个文件时必须同时 bump 版本号**。
+- `/images/*`：7 天长缓存，引用处同样带 `?v=` 版本号；**换图时必须 bump**（否则 Cloudflare 会按自己的默认策略缓存 4 小时，用户端一直看到旧图）。
 - `/downloads/*`：7 天公开缓存（文件名不变即内容不变）。
 
 ## 部署（VPS: `ssh vps`）
