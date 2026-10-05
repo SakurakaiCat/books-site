@@ -39,6 +39,8 @@ TARGETS = [
 
 DPI = 110          # 单栏版心 524.41pt 宽 → 802px，再缩放到目标宽度
 WEBP_QUALITY = 82
+COVER_WIDTH = 1000     # 首页大封面（covers/journey-cover.webp）的输出宽度
+COVER_QUALITY = 85
 
 
 def load_decoder(cipher_path: Path):
@@ -98,11 +100,29 @@ def render_webp(pdf: Path, page: int, out: Path, width: int):
     resized.convert("RGB").save(out, "WEBP", quality=WEBP_QUALITY, method=6)
 
 
+def extract_cover_art(pdf: Path):
+    """取合订本第 1 页里嵌入的封面原图——比重新渲染更清晰。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        stem = Path(tmp) / "cover"
+        subprocess.run(
+            ["pdfimages", "-png", "-f", "1", "-l", "1", str(pdf), str(stem)],
+            check=True,
+        )
+        files = sorted(Path(tmp).glob("cover-*.png"))
+        if not files:
+            raise SystemExit(f"{pdf.name} 第 1 页没有嵌入图片，无法提取封面原图")
+        sizes = {f: Image.open(f).size for f in files}
+        best = max(files, key=lambda f: sizes[f][0] * sizes[f][1])
+        return Image.open(best).convert("RGB").copy()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--clean-dir", required=True, type=Path, help="含 *_无水印版.pdf 的发布目录")
     ap.add_argument("--cipher", required=True, type=Path, help="mjourney/tools/extraction_cipher.json")
     ap.add_argument("--out", required=True, type=Path, help="截图输出目录")
+    ap.add_argument("--cover-out", type=Path, default=None,
+                    help="封面输出目录（写入 journey-cover.webp，取自合订本第 1 页嵌入原图）")
     ap.add_argument("--width", type=int, default=800, help="输出宽度（默认 800）")
     args = ap.parse_args()
 
@@ -117,6 +137,16 @@ def main() -> int:
         render_webp(pdf, page, dest, args.width)
         label = "封面" if mode == "cover" else needle
         print(f"{name}.webp ← {pdf_name} 第 {page} 页（{label}）")
+
+    if args.cover_out:
+        pdf = args.clean_dir / "中学数学之旅_合订本_无水印版.pdf"
+        art = extract_cover_art(pdf)
+        w, h = art.size
+        dest = args.cover_out / "journey-cover.webp"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        art.resize((COVER_WIDTH, round(h * COVER_WIDTH / w)), Image.LANCZOS).save(
+            dest, "WEBP", quality=COVER_QUALITY, method=6)
+        print(f"covers/journey-cover.webp ← {pdf.name} 第 1 页嵌入原图 {w}x{h}")
     return 0
 
 

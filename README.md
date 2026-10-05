@@ -74,16 +74,21 @@ CGO_ENABLED=0 go build -trimpath -o books-api .
 
 ## 内容预览截图
 
-`frontend/images/books/previews/` 里的书页截图由 `scripts/make-previews.py` 生成，
-源是 mjourney 发布目录里的 **无水印版** PDF（截图用于展示成品观感，免费版页脚带水印这一点在页面文案里另有说明）：
+`frontend/images/books/previews/` 里的书页截图与 `frontend/images/books/covers/journey-cover.webp`
+（首页大封面）都由 `scripts/make-previews.py` 生成，源是 mjourney 发布目录里的 **无水印版** PDF
+（截图用于展示成品观感，免费版页脚带水印这一点在页面文案里另有说明）：
 
 | 文件 | 来源 | 说明 |
 | --- | --- | --- |
-| `journey-cover.webp` | 合订本 第 1 页 | 封面 |
-| `journey-formula.webp` | 第一卷 §1.2 乘法公式与因式分解 | 页眉定位 |
-| `journey-composite.webp` | 第一卷 §3.8 函数的复合 | 页眉定位 |
-| `journey-lp.webp` | 第三卷 §3.2 线性规划初步 | 按图题「无界可行域」定位 |
-| `func-math-*.webp` | 《函数与导数》（另一个书稿仓库） | 手工留存的旧图，未随本次重构更新 |
+| `covers/journey-cover.webp` | 合订本 第 1 页**嵌入的封面原图** | 首页大图，1489×2105 原图缩到 1000px |
+| `previews/journey-cover.webp` | 合订本 第 1 页 | 缩略图（800px 渲染） |
+| `previews/journey-formula.webp` | 第一卷 §1.2 乘法公式与因式分解 | 页眉定位 |
+| `previews/journey-composite.webp` | 第一卷 §3.8 函数的复合 | 页眉定位 |
+| `previews/journey-lp.webp` | 第三卷 §3.2 线性规划初步 | 按图题「无界可行域」定位 |
+| `previews/func-math-*.webp` | 《函数与导数》（另一个书稿仓库） | 手工留存的旧图，未随本次重构更新 |
+
+> 曾经用过的 `covers/journey-cover.png` 是一张几乎全白、封面图缺失的坏文件（页面上表现为「封面是破的」），
+> 已换成从 PDF 里抽出的封面原图；改用 WebP 后只有 ~25KB。
 
 发布版 PDF 的文本层被 `anti_extract.py` 毒化（ToUnicode 同形字），直接 pdftotext 得到的是
 乱码；脚本用 mjourney 的密表 `tools/extraction_cipher.json` 还原文本，再按页眉/图题定位页码，
@@ -93,7 +98,8 @@ CGO_ENABLED=0 go build -trimpath -o books-api .
 python3 scripts/make-previews.py \
     --clean-dir /root/Desktop/mjourney_release \
     --cipher /root/mjourney/tools/extraction_cipher.json \
-    --out frontend/images/books/previews
+    --out frontend/images/books/previews \
+    --cover-out frontend/images/books/covers
 ```
 
 改完记得 rsync 到 VPS，并 bump `index.html` 里的 `?v=` 版本号。
