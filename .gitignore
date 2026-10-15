@@ -8,5 +8,10 @@ backend/books-api
 backend/books-api.bak
 *.log
 
+# Worker (Cloudflare Workers deployment for suisei.de)
+worker/.dev.vars
+worker/.wrangler/
+worker/node_modules/
+
 # OS noise
 .DS_Store

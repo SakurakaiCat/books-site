@@ -1,0 +1,18 @@
+# Cache policy parity with the nginx vhost (books.rikka.moe.conf):
+# HTML always revalidates so a redesign is visible immediately; versioned
+# assets (?v=YYYYMMDDx) sit behind a 7-day browser cache.
+/assets/*
+  Cache-Control: public, max-age=604800
+  X-Content-Type-Options: nosniff
+
+/images/*
+  Cache-Control: public, max-age=604800
+  X-Content-Type-Options: nosniff
+
+/
+  Cache-Control: no-cache, must-revalidate
+  X-Content-Type-Options: nosniff
+
+/*.html
+  Cache-Control: no-cache, must-revalidate
+  X-Content-Type-Options: nosniff

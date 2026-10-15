@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "books-suisei",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "account_id": "53f4ca28510d4eeacad18cb0cc7b2c7b",
+  "assets": {
+    "directory": "../frontend",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/downloads/*", "/healthz"]
+  },
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "books-files"
+    }
+  ],
+  "vars": {
+    "PREMIUM_DOWNLOAD_URL": "/premium/journey/journey-full-clean.pdf,/premium/journey/journey-vol1-clean.pdf,/premium/journey/journey-vol2-clean.pdf,/premium/journey/journey-vol3-clean.pdf,/premium/journey/journey-vol4-clean.pdf,/premium/journey/journey-vol5-clean.pdf,/premium/journey/journey-clean-all.zip",
+    "PREMIUM_DOWNLOAD_LABELS": "合订本 PDF（无水印）,第一卷 PDF（无水印）,第二卷 PDF（无水印）,第三卷 PDF（无水印）,第四卷 PDF（无水印）,第五卷 PDF（无水印）,全部分卷 ZIP（无水印）",
+    "ALLOWED_ORIGINS": "https://suisei.de"
+  },
+  "routes": [
+    {
+      "pattern": "suisei.de",
+      "custom_domain": true
+    }
+  ]
+}

@@ -1,18 +1,21 @@
 # books-site
 
-[books.rikka.moe](https://books.rikka.moe) 的落地页与下载后端。仓库里保存的是**可直接部署的产物**，
-没有构建步骤：`frontend/` 原样 rsync 到 VPS，`backend/` 用 `go build` 出一个静态二进制。
+[suisei.de](https://suisei.de) 的落地页与下载后端，整体运行在 **Cloudflare Workers** 上：
+`frontend/` 作为 Workers 静态资源直接部署，`worker/`（TypeScript）提供密钥验证与下载 API，
+书稿文件存放在 R2 桶 `books-files`。旧的 `books.rikka.moe` 域名在 VPS nginx 上只做
+301 跳转到 suisei.de；`backend/`（Go）是已退役的参考实现，不再部署。
 
 ## 目录
 
 | 路径 | 说明 |
 | --- | --- |
-| `frontend/` | 静态站点根目录 → VPS `/opt/books-site/frontend` |
+| `frontend/` | 静态站点根目录 → Workers 静态资源（`_headers` 定义缓存策略） |
 | `frontend/index.html` | 手写的单文件页面（无框架、无水合脚本） |
 | `frontend/assets/site.css` | 全站唯一样式表（极简风格：一栏阅读流 + 大按钮） |
 | `frontend/assets/site.js` | 爱发电密钥验证（页面唯一交互） |
 | `frontend/images/`、`favicon.*`、`sitemap-*.xml` | 封面、内容预览图与站点元数据 |
-| `backend/` | `books-api`：校验爱发电密钥、签发 HMAC cookie、内部投递精装版文件 |
+| `worker/` | books-api 的 Workers 移植：校验爱发电密钥、签发 HMAC cookie、从 R2 投递文件 |
+| `backend/` | 已退役的 Go 实现（API 契约的原始参考，逻辑见 `backend/main.go` 头注释） |
 | `scripts/dev-server.mjs` | 本地静态 + API 反向代理（`node scripts/dev-server.mjs frontend`） |
 | `scripts/make-previews.py` | 从最新发布构建的 PDF 重新生成页面上的书页截图 |
 
@@ -38,39 +41,46 @@
 ## 下载模型
 
 | 版本 | 面向 | 交付方式 |
-| --- | --- | --- |
-| 带水印版 | 所有人 | `/downloads/journey/...`，nginx 直接服务，支持 Range 断点续传 |
-| 无水印版（精装） | 爱发电赞助者 | 页内输入密钥 → `POST /api/books/verify` → `GET /api/books/download/{index}` → nginx 内部投递 |
+| --- | --- |
+| 带水印版 | 所有人 | `/downloads/journey/...`，Worker 从 R2 流式响应，支持 Range 断点续传 |
+| 无水印版（精装） | 爱发电赞助者 | 页内输入密钥 → `POST /api/books/verify` → `GET /api/books/download/{index}` → Worker 校验签名 cookie 后从 R2 投递 |
 
-VPS 上的文件布局：
+R2 桶 `books-files` 里的对象布局（`/downloads/` 与精装版的门禁都由 Worker 完成，桶本身不公开）：
 
 ```
-/srv/books-files/public/journey/    # 带水印版 PDF / zip（对外 /downloads/，文件名为中文）
-/srv/books-files/premium/journey/   # 无水印版 PDF / zip（仅 nginx internal /protected/，经 books-api 转发）
+public/journey/    # 带水印版 PDF / zip（对外 /downloads/，文件名为中文）
+premium/journey/   # 无水印版 PDF / zip（仅 Worker 内部可达，经签名 cookie 校验）
 ```
 
-精装版文件用 ASCII 名存放，下载时展示的中文名由 books-api 的 `Content-Disposition` 给出
-（见 `backend/main.go` 的 `downloadNames`）。`/protected/` 是对外 404 的 `internal` location，
-只有带签名 cookie 的请求才会被 `X-Accel-Redirect` 引到那里。
+精装版文件用 ASCII 名存放，下载时展示的中文名由 Worker 的 `Content-Disposition` 给出
+（见 `worker/src/index.ts` 的 `DOWNLOAD_NAMES`，`backend/main.go` 的 `downloadNames`
+是同一张表的退役参考）。R2 里没有 `internal` location 的概念——未走 Worker 签名校验的
+请求根本无法触达桶内对象。
 
-## 后端
+## 后端（worker/）
 
-API：
+API 契约与退役的 Go 版完全一致：
 
 ```
 POST /api/books/verify           {"key": "..."} -> {"success": true, "labels": [...]} + Set-Cookie
-GET  /api/books/download/{index} 带 cookie -> 文件本体（站内自托管）或 302（外部 URL）
+GET  /api/books/download/{index} 带 cookie -> 文件本体（R2 站内自托管）或 302（外部 URL）
 GET  /healthz                    -> {"ok": true}
 ```
 
-环境变量见 `backend/.env.example`。`PREMIUM_DOWNLOAD_URL` 中以 `/` 开头的条目视为**站内自托管**
-（走 `X-Accel-Redirect`，字节不经过本进程），否则按原来的 302 跳转；`PREMIUM_DOWNLOAD_LABELS`
-是可选的下发按钮文案，缺项回退到按 URL 推导的文案。
+配置在 `worker/wrangler.jsonc`：`PREMIUM_DOWNLOAD_URL` / `PREMIUM_DOWNLOAD_LABELS` /
+`ALLOWED_ORIGINS` 是明文 vars；`BOOK_KEYS` / `SIGNING_SECRET` 用
+`wrangler secret put` 注入（`.dev.vars` 提供本地开发值）。`PREMIUM_DOWNLOAD_URL` 中以
+`/` 开头的条目视为**站内自托管**——路径去掉开头斜杠即 R2 对象键，字节经 Worker 流式
+转发；否则按原来的 302 跳转。
+
+类型检查 / 本地运行：
 
 ```sh
-cd backend && go vet ./... && go test ./...
-CGO_ENABLED=0 go build -trimpath -o books-api .
+cd worker && npm ci && npm run typecheck
+npx wrangler dev --port 8799 --local   # 本地 R2 需先用 wrangler r2 object put --local 播种
 ```
+
+Go 参考实现保留在 `backend/`（`go test` 仍可用于核对契约语义），不再部署。
 
 ## 内容预览截图
 
@@ -102,49 +112,58 @@ python3 scripts/make-previews.py \
     --cover-out frontend/images/books/covers
 ```
 
-改完记得 rsync 到 VPS，并 bump `index.html` 里的 `?v=` 版本号。
+改完记得 `wrangler deploy`，并 bump `index.html` 里的 `?v=` 版本号。
 
 ## 缓存策略
 
-- HTML（`/` 与 `*.html`）：nginx 发 `Cache-Control: no-cache, must-revalidate`，浏览器每次回源校验，未变走 304——改版即时可见。
-- `/assets/site.{css,js}`：7 天长缓存，但 index.html 引用时带 `?v=YYYYMMDD` 版本号；**改这两个文件时必须同时 bump 版本号**。
-- `/images/*`：7 天长缓存，引用处同样带 `?v=` 版本号；**换图时必须 bump**（否则 Cloudflare 会按自己的默认策略缓存 4 小时，用户端一直看到旧图）。
-- `/downloads/*`：7 天公开缓存（文件名不变即内容不变）。
+由 `frontend/_headers` 声明（Workers 静态资产会读取该文件，规则与原 nginx vhost 一致）：
 
-## 部署（VPS: `ssh vps`）
+- HTML（`/` 与 `*.html`）：`no-cache, must-revalidate`，浏览器每次回源校验——改版即时可见。
+- `/assets/site.{css,js}`：7 天长缓存，但 index.html 引用时带 `?v=YYYYMMDD` 版本号；**改这两个文件时必须同时 bump 版本号**。
+- `/images/*`：7 天长缓存，引用处同样带 `?v=` 版本号；**换图时必须 bump**。
+- `/downloads/*`：Worker 响应 7 天公开缓存（文件名不变即内容不变），另带 `Accept-Ranges` 与 `ETag`。
+
+## 部署（Cloudflare Workers）
 
 ```sh
-# 前端
-rsync -a --delete frontend/ vps:/opt/books-site/frontend/
-ssh vps 'chown -R root:root /opt/books-site/frontend'
+cd worker && npm ci
 
-# 后端（改过 backend/ 时）
-rsync -a backend/ vps:/root/books-api-build/
-ssh vps 'cd /root/books-api-build && CGO_ENABLED=0 go build -trimpath -o /tmp/books-api && \
-         install -m755 /tmp/books-api /opt/books-site/books-api && systemctl restart books-api && \
-         systemctl is-active books-api'
+# 前端资产 + Worker 一起部署；suisei.de 自定义域在 wrangler.jsonc 里声明，deploy 时自动绑定
+CLOUDFLARE_API_TOKEN=<token> npx wrangler deploy
+
+# secrets（首次部署或轮换时；BOOK_KEYS 与原 /opt/books-site/books-api.env 一致）
+printf '%s' "$BOOK_KEYS"      | CLOUDFLARE_API_TOKEN=<token> npx wrangler secret put BOOK_KEYS
+printf '%s' "$SIGNING_SECRET" | CLOUDFLARE_API_TOKEN=<token> npx wrangler secret put SIGNING_SECRET
 ```
 
 运行位置：
 
-- systemd 单元 `books-api.service`（`DynamicUser=yes`，`ProtectSystem=strict`），
-  二进制 `/opt/books-site/books-api`，环境文件 `/opt/books-site/books-api.env`（600）。
-- nginx 站点 `/etc/nginx/sites-enabled/books.rikka.moe`：`/api/` 与 `/healthz` → `127.0.0.1:8787`；
-  `/downloads/` → `alias /srv/books-files/public/`；`/protected/` → `internal` + `alias /srv/books-files/premium/`。
-  改配置后 `cp -a` 备份到 `/root/nginx-backups/`（**不要**留在 `sites-enabled/`，否则 server_name 冲突），
-  然后 `nginx -t && systemctl reload nginx`。
+- Worker `books-suisei`（账户 `53f4ca28510d4eeacad18cb0cc7b2c7b`），自定义域 `suisei.de`。
+- R2 桶 `books-files`（private），绑定 `FILES`；静态资产绑定 `ASSETS`，`run_worker_first`
+  让 `/api/*`、`/downloads/*`、`/healthz` 先进 Worker，其余路径直接走资产。
+- 密钥与签名密钥只存在于 Worker secrets 里；R2 只有带有效 HMAC cookie 的请求才能读到
+  `premium/` 前缀的对象。
+
+### 旧 VPS 路径（已退役，2026-10-15）
+
+- `books.rikka.moe` 的 nginx vhost（`/etc/nginx/sites-enabled/books.rikka.moe.conf`）现在
+  **只做 301** 到 `https://suisei.de$request_uri`；ACME webroot 保留，certbot 续期不受影响。
+  修改前的完整配置备份在 `/root/nginx-backups/`。
+- `books-api.service`（Go 后端）已 `systemctl disable --now`；如需临时回滚：
+  恢复备份的 vhost + `systemctl enable --now books-api` + `systemctl reload nginx`。
 
 ## 更新书稿
 
-重新编译出 PDF 后：
+重新编译出 PDF 后，上传到 R2（rclone，S3 兼容端点
+`https://53f4ca28510d4eeacad18cb0cc7b2c7b.r2.cloudflarestorage.com`，密钥对见 Cloudflare
+控制台的 R2 API token）：
 
 ```sh
-# 带水印版 → public，无水印版 → premium（精装版文件名保持 ASCII）
-rsync -a --delete 无水印版目录/ vps:/srv/books-files/premium/journey/
-rsync -a --delete 水印版目录/   vps:/srv/books-files/public/journey/
-ssh vps 'chown -R root:root /srv/books-files && chmod -R a+rX /srv/books-files'
+# 带水印版 → public/，无水印版 → premium/（精装版文件名保持 ASCII）
+rclone copy --config <r2.conf> 无水印版目录/ r2:books-files/premium/journey/
+rclone copy --config <r2.conf> 水印版目录/   r2:books-files/public/journey/
 ```
 
 新增/删除文件时同步更新 `frontend/index.html` 里的免费下载列表、
-`books-api.env` 的 `PREMIUM_DOWNLOAD_URL` / `PREMIUM_DOWNLOAD_LABELS`，
-以及 `backend/main.go` 的 `downloadNames`。
+`worker/wrangler.jsonc` 的 `PREMIUM_DOWNLOAD_URL` / `PREMIUM_DOWNLOAD_LABELS`，
+以及 `worker/src/index.ts` 的 `DOWNLOAD_NAMES`（`backend/main.go` 的同名表仅作参考）。
